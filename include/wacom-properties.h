@@ -27,6 +27,8 @@
 /* 32 bit, 4 values, top x, top y, bottom x, bottom y */
 #define WACOM_PROP_TABLET_AREA "Wacom Tablet Area"
 
+#define WACOM_PROP_CALIBRATION_GRID "Wacom Tablet Calibration Grid"
+
 /* 8 bit, 1 value, [0 - 3] (NONE, CW, CCW, HALF) */
 #define WACOM_PROP_ROTATION "Wacom Rotation"
 

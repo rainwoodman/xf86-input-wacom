@@ -163,6 +163,14 @@ extern void wcmUpdateRotationProperty(WacomDevicePtr priv);
 extern void wcmUpdateSerial(InputInfoPtr pInfo, unsigned int serial, int id);
 extern void wcmUpdateHWTouchProperty(WacomDevicePtr priv, int touch);
 
+/* Calibration */
+extern int wcmCalibrationGridSetData(WacomCalibrationGridPtr grid, int bx, int by, float x, float y);
+extern void wcmDevCoordToUnitCoord(WacomCalibrationGridPtr grid, int devx, int devy, float *unitx, float * unity);
+extern void wcmFreeCalibrationGrid(WacomCalibrationGridPtr grid);
+extern WacomCalibrationGridPtr wcmNewCalibrationGrid(int devsizex, int devsizey, int nx, int ny);
+extern WacomCalibrationGridPtr wcmNewCalibrationGridFromString(int devsizex, int devsizey, char * data);
+extern void wcmInfoCalibrationGrid(WacomCalibrationGridPtr grid);
+
 /* Utility functions */
 extern Bool is_absolute(InputInfoPtr pInfo);
 extern void set_absolute(InputInfoPtr pInfo, Bool absolute);

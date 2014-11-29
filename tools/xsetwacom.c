@@ -109,6 +109,8 @@ static void get_map(Display *dpy, XDevice *dev, param_t *param, int argc, char *
 static void set_rotate(Display *dpy, XDevice *dev, param_t *param, int argc, char **argv);
 static void get_rotate(Display *dpy, XDevice *dev, param_t *param, int argc, char **argv);
 static void set_xydefault(Display *dpy, XDevice *dev, param_t *param, int argc, char **argv);
+static void set_calibration_grid(Display *dpy, XDevice *dev, param_t*param, int argc, char **argv);
+static void get_calibration_grid(Display *dpy, XDevice *dev, param_t*param, int argc, char **argv);
 static void get_all(Display *dpy, XDevice *dev, param_t *param, int argc, char **argv);
 static void get_param(Display *dpy, XDevice *dev, param_t *param, int argc, char **argv);
 static void set_output(Display *dpy, XDevice *dev, param_t *param, int argc, char **argv);
@@ -389,6 +391,14 @@ static param_t parameters[] =
 		.arg_count = 0,
 		.prop_flags = PROP_FLAG_WRITEONLY,
 		.set_func = set_xydefault,
+	},
+	{
+		.name = "CalibrationGrid",
+		.desc = "Sets the calibration grid from file (`-' for stdin) ",
+		.prop_name = WACOM_PROP_CALIBRATION_GRID,
+		.arg_count = 1,
+		.set_func = set_calibration_grid,
+		.get_func = get_calibration_grid,
 	},
 	{
 		.name = "ToolType",
@@ -1441,6 +1451,114 @@ static void map_actions(Display *dpy, XDevice *dev, param_t* param, int argc, ch
 	special_map_property(dpy, dev, action_prop, offset, argc, argv);
 }
 
+static void set_calibration_grid(Display *dpy, XDevice *dev, param_t*param, int argc, char **argv) {
+	Atom prop;
+	char * string, * s2;
+	int total = 1024;
+	int nread = 0;
+	char * p;
+	char * q;
+	FILE * fp;
+	if(argc != 0 && argc != param->arg_count) 
+	{
+		fprintf(stderr, "'%s' requires exactly %d value(s).\n", param->name,
+			param->arg_count);
+		return;
+	}
+	prop = XInternAtom(dpy, param->prop_name, True);
+	if (!prop)
+	{
+		fprintf(stderr, "Property for '%s' not available.\n",
+			param->name);
+		goto out;
+	}
+	if(argc != 0) {
+		if(!strcmp(argv[0], "-")) 
+		{
+			fp = stdin;
+		}
+		else 
+		{
+			fp = fopen(argv[0], "r");
+			if(fp == NULL) {
+				fprintf(stderr, "Input file '%s' not available.\n",
+					argv[0]);
+				goto out;
+			}
+		    
+		}
+		string = malloc(total);
+		while(!feof(fp)) {
+			if(string == NULL) 
+			{
+				fprintf(stderr, "No memory for the property\n");
+				fclose(fp);
+				goto out;
+			}
+			nread += fread(string + nread, 1, total - nread - 1, fp);
+			total *= 2;
+			string = realloc(string, total);
+			string[nread] = 0;
+		}
+		s2 = malloc(strlen(string) + 1);
+		q = s2;
+		for (p = string; *p; p ++) {
+		    if(*p != '\n' && *p != ' ') {
+			*q = *p;
+			q ++;
+		    }
+		}
+		*q = 0;
+		fclose(fp);
+		free(string);
+	} else {
+	    s2 = strdup("");
+	}
+	XChangeDeviceProperty(dpy, dev, prop, XA_STRING, 8,
+				PropModeReplace, s2, strlen(s2) + 1);
+	XFlush(dpy);
+	free(s2);
+out:
+	return;
+}
+static void get_calibration_grid(Display *dpy, XDevice *dev, param_t*param, int argc, char **argv) {
+	Atom prop, type;
+	int format;
+	unsigned char* data = NULL;
+	unsigned long nitems, bytes_after;
+
+	if(argc != 0) 
+	{
+		fprintf(stderr, "Incorrect number of arguments supplied.\n");
+		return;
+	}
+	prop = XInternAtom(dpy, param->prop_name, True);
+	if (!prop)
+	{
+		fprintf(stderr, "Property for '%s' not available.\n",
+			param->name);
+		return;
+	}
+
+	TRACE("Getting calibration grid for device %ld.\n", dev->device_id);
+
+	XGetDeviceProperty(dpy, dev, prop, 0, 4096000, False, AnyPropertyType,
+				&type, &format, &nitems, &bytes_after, &data);
+	if(bytes_after > 0) {
+		fprintf(stderr, "Property for '%s' is too big - this is a bug.\n",
+			param->name);
+		free(data);
+		return;
+	}	
+	if (type != XA_STRING || format != 8)
+	{
+		fprintf(stderr, "Property for '%s' has no or wrong value - this is a bug.\n",
+			param->name);
+		free(data);
+		return;
+	}
+	print_value(param, "%s", data);
+}
 static void set_xydefault(Display *dpy, XDevice *dev, param_t* param, int argc, char **argv)
 {
 	Atom prop, type;

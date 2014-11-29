@@ -80,6 +80,7 @@ int wcmDevSwitchMode(ClientPtr client, DeviceIntPtr dev, int mode)
 }
 
 static Atom prop_devnode;
+static Atom prop_calibration_grid;
 static Atom prop_rotation;
 static Atom prop_tablet_area;
 static Atom prop_pressurecurve;
@@ -225,6 +226,10 @@ void InitWcmDeviceProperties(InputInfoPtr pInfo)
 		values[2] = priv->bottomX;
 		values[3] = priv->bottomY;
 		prop_tablet_area = InitWcmAtom(pInfo->dev, WACOM_PROP_TABLET_AREA, XA_INTEGER, 32, 4, values);
+		prop_calibration_grid = MakeAtom(WACOM_PROP_CALIBRATION_GRID, strlen(WACOM_PROP_CALIBRATION_GRID), TRUE);
+		XIChangeDeviceProperty(pInfo->dev, prop_calibration_grid, XA_STRING, 8,
+					PropModeReplace, 0, "", FALSE);
+		XISetDevicePropertyDeletable(pInfo->dev, prop_calibration_grid, FALSE);
 	}
 
 	values[0] = common->wcmRotate;
@@ -694,6 +699,29 @@ int wcmSetProperty(DeviceIntPtr dev, Atom property, XIPropertyValuePtr prop,
 
 	if (property == prop_devnode || property == prop_product_id)
 		return BadValue; /* Read-only */
+	else if (property == prop_calibration_grid) {
+		char * data = (char*) prop->data;
+		WacomCalibrationGridPtr calib = NULL;
+		xf86Msg(X_INFO, "Building CalibrationGrid out of `%s`\n", data);
+		if(strlen(data)) {
+			calib = wcmNewCalibrationGridFromString(priv->maxX, priv->maxY, data);
+			if(!calib) {
+			    xf86Msg(X_WARNING, "Failed to build CalibrationGrid out of `%s`\n", data);
+			    return BadValue;
+			}
+		}
+		if(!checkonly) {
+			if(priv->calib) {
+				wcmFreeCalibrationGrid(priv->calib);
+			}
+			priv->calib = calib;
+			wcmInfoCalibrationGrid(calib);
+		} else {
+			if(calib) {
+				wcmFreeCalibrationGrid(calib);
+			}
+		}
+	}
 	else if (property == prop_tablet_area)
 	{
 		INT32 *values = (INT32*)prop->data;

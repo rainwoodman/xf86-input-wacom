@@ -5,6 +5,7 @@ DRIVER_SOURCES= \
 	$(top_srcdir)/src/xf86Wacom.h \
 	$(top_srcdir)/src/wcmCommon.c \
 	$(top_srcdir)/src/wcmConfig.c \
+	$(top_srcdir)/src/wcmCalibrate.c \
 	$(top_srcdir)/src/wcmISDV4.c \
 	$(top_srcdir)/src/wcmFilter.c \
 	$(top_srcdir)/src/wcmFilter.h \

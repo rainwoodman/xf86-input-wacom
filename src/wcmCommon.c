@@ -446,10 +446,23 @@ void wcmRotateAndScaleCoordinates(InputInfoPtr pInfo, int* x, int* y)
 	DeviceIntPtr dev = pInfo->dev;
 	AxisInfoPtr axis_x, axis_y;
 	int tmp_coord;
-
+	float ux, uy;
+	int newx, newy;
 	/* scale into on topX/topY area */
 	axis_x = &dev->valuator->axes[0];
 	axis_y = &dev->valuator->axes[1];
+
+	if (priv->calib) {
+		/* first map to the unit coord,
+                 * then to a fake device coord that has compensated for the distortion
+		 * */
+		wcmDevCoordToUnitCoord(priv->calib, *x, *y, &ux, &uy);
+		newx = ux * (priv->bottomX - priv->topX) + priv->topX;
+		newy = uy * (priv->bottomY - priv->topY) + priv->topY;
+		//xf86Msg(X_INFO, "wacom: using calibration data: %d %d -> %d %d\n", *x, *y, newx, newy);
+		*x = newx;
+		*y = newy;
+	} 
 
 	/* Don't try to scale relative axes */
 	if (axis_x->max_value > axis_x->min_value)

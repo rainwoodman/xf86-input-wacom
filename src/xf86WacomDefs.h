@@ -239,6 +239,16 @@ static const struct _WacomDeviceState OUTPROX_STATE = {
   .abswheel2 = MAX_PAD_RING + 1
 };
 
+
+struct _WacomCalibrationGrid {
+	float * UnitCoord[2];	
+	int * DevGrid[2];
+	int size[2];
+	int nx;
+	int ny;
+};
+typedef struct _WacomCalibrationGrid WacomCalibrationGrid, *WacomCalibrationGridPtr;
+
 struct _WacomDeviceRec
 {
 	char *name;		/* Do not move, same offset as common->device_path. Used by DBG macro */
@@ -261,6 +271,8 @@ struct _WacomDeviceRec
 	unsigned int serial;	/* device serial number this device takes (if 0, any serial is ok) */
 	unsigned int cur_serial; /* current serial in prox */
 	int cur_device_id;	/* current device ID in prox */
+
+	WacomCalibrationGridPtr calib;  /* calibration grid, overrides topX/bottomX area if not NULL */
 
 	/* button mapping information
 	 *

@@ -126,6 +126,8 @@ static void wcmFree(InputInfoPtr pInfo)
 	TimerFree(priv->serial_timer);
 	TimerFree(priv->tap_timer);
 	TimerFree(priv->touch_timer);
+	if(priv->calib)
+		wcmFreeCalibrationGrid(priv->calib);
 	free(priv->tool);
 	wcmFreeCommon(&priv->common);
 	free(priv);
