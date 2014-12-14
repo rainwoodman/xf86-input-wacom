@@ -77,47 +77,50 @@ class Store(object):
         self.scrp.append(scrp)
         self.devp.append(devp)
 
-    def predict(self, scrp):
-        """ predict the devp of scrp based on measured points """
-        devp = (griddata(self.scrp, self.devp[..., 0], scrp, method='linear'),
-                griddata(self.scrp, self.devp[..., 1], scrp, method='linear'))
-        return devp 
-
-    def invert(self, devp):
+    def predict(self, devp):
         """ return the calibration from devp to scrp """
         allscrp = numpy.array(self.scrp)
         intpx = griddata(self.devp, allscrp[..., 0], devp, method='linear')
         intpy = griddata(self.devp, allscrp[..., 1], devp, method='linear')
-        return numpy.array(zip(intpx, intpy))
+        return numpy.array((intpx, intpy)).T.copy()
         
 class UI(Gtk.DrawingArea):
     __gsignals__ = {
         'aborted': (GObject.SIGNAL_RUN_FIRST, None, ()),
-        'clicked': (GObject.SIGNAL_RUN_FIRST, None, (int, int)),
-        'canceled': (GObject.SIGNAL_RUN_FIRST, None, ()),
-        'started': (GObject.SIGNAL_RUN_FIRST, None, ()),
+        'finished': (GObject.SIGNAL_RUN_FIRST, None, ()),
     }
 
-    def __init__(self, store):
+    def __init__(self, store, devxmin, devymin, devxmax, devymax):
         Gtk.DrawingArea.__init__(self)
-        self.cursor = Gdk.Cursor(Gdk.CursorType.BLANK_CURSOR)
+        self.cursor = Gdk.Cursor(Gdk.CursorType.CROSSHAIR)
 
         self.store = store
         self.devw = store.devw
         self.devh = store.devh
-
+        self.devxmin = devxmin
+        self.devymin = devymin
+        self.devxmax = devxmax
+        self.devymax = devymax
+        self.set_can_focus(True)
         self.add_events(
                     Gdk.EventMask.EXPOSURE_MASK |
                     Gdk.EventMask.ENTER_NOTIFY_MASK |
                     Gdk.EventMask.LEAVE_NOTIFY_MASK |
                     Gdk.EventMask.BUTTON_RELEASE_MASK |
                     Gdk.EventMask.BUTTON_PRESS_MASK |
-                    Gdk.EventMask.POINTER_MOTION_MASK
+                    Gdk.EventMask.KEY_PRESS_MASK |
+                    Gdk.EventMask.POINTER_MOTION_MASK 
                     )
         self.cross_position = None
         self.text = "Click to start"
         self.stylus_position = (0, 0)
         self.points = []
+    @property
+    def screen_size(self):
+        scr = self.get_screen()
+        sw = scr.get_width()
+        sh = scr.get_height()
+        return sw, sh
 
     def do_realize(self):
         Gtk.DrawingArea.do_realize(self)
@@ -128,10 +131,6 @@ class UI(Gtk.DrawingArea):
         self.get_window().set_cursor(self.cursor)
         self.cursor = old
 
-    def do_key_press_event(self, event):
-        if event.keyval == Gdk.KEY_Escape:
-            self.emit('aborted')
-        
     def do_leave_notify_event(self, event):
         win = self.get_window()
         old = win.get_cursor()
@@ -151,27 +150,52 @@ class UI(Gtk.DrawingArea):
         self.stylus_position = (x, y)
         self.queue_draw()
         
+    def do_button_press_event(self, event): 
+        x, y = event.get_root_coords()
+        x, y = self._todev(x, y)
+        self.stylus_position = (x, y)
+        if event.button == 1:
+            cp = self.store.predict(self.stylus_position)
+            self.cross_position = cp
+        self.queue_draw()
+
     def do_button_release_event(self, event): 
         x, y = event.get_root_coords()
-        if event.button == 3:
-            self.emit('canceled')
-        elif event.button == 1:
-            if self.cross_position is None:
-                self.emit('started')
-            else:
-                x, y = self._todev(x, y)
-                self.emit('clicked', x, y)
+        x, y = self._todev(x, y)
+        self.stylus_position = (x, y)
+        if event.button == 1:
+            self.store.push(self.cross_position, self.stylus_position)
+        self.queue_draw()
+
+    def do_key_press_event(self, event):
+        sw, sh = self.screen_size
+        if event.state & Gdk.ModifierType.SHIFT_MASK:
+            step = 5.0
+        else:
+            step = 1.0
+
+        if event.keyval == Gdk.KEY_Escape:
+            self.emit('finished')
+        elif event.keyval == Gdk.KEY_Up:
+            self.cross_position[1] -= step / sh
+        elif event.keyval == Gdk.KEY_Down:
+            self.cross_position[1] += step / sh
+        elif event.keyval == Gdk.KEY_Left:
+            self.cross_position[0] -= step / sw
+        elif event.keyval == Gdk.KEY_Right:
+            self.cross_position[0] += step / sw 
+        self.queue_draw()
 
     def _todev(self, x, y):
         """ convert screen coord to dev coord """
-        scr = self.get_screen()
-        sw = (scr.get_width() - 1)
-        sh = (scr.get_height() - 1)
-        devx = 1.0 * x / sw * self.devw
-        devy = 1.0 * y / sh * self.devh
+        sw, sh = self.screen_size
+        devx = 1.0 * x / sw * (self.devxmax - self.devxmin) + self.devxmin
+        devy = 1.0 * y / sh * (self.devymax - self.devymin) + self.devymin
         return devx, devy
 
     def do_draw(self, context):
+
+        # do not use screen size for ease of debugging
         width = self.get_allocated_width()
         height = self.get_allocated_height()
         context.push_group()
@@ -208,8 +232,9 @@ class UI(Gtk.DrawingArea):
 
         if self.cross_position is not None:
             x, y = self.cross_position
-            x = x * (width - 1)
-            y = y * (height - 1)
+            sw, sh = self.screen_size
+            x *= sw
+            y *= sh
             self.draw_cross(context, crosscolor, x, y, 10, 1)
             # current scr pos
             context.set_font_size(28)
@@ -219,42 +244,15 @@ class UI(Gtk.DrawingArea):
             context.move_to(width / 2 - stw / 2, height / 2 + lth + pth)
             context.show_text(ct)
 
-        self.draw_stylus_pad(context, border_color, stylus_color, picked_color)
+        for pt in self.store.scrp:
+            sw, sh = self.screen_size
+            x, y = pt
+            x *= sw
+            y *= sh
+            self.draw_cross(context, crosscolor, x, y, 4, 1)
+            
         context.set_source(context.pop_group())
         context.paint()
-
-    def _stylus_reading_to_screen(self, x, y):
-        width = self.get_allocated_width()
-        height = self.get_allocated_height()
-        vw = width / 2
-        vh = height / 2
-        vxp = width / 4
-        vyp = height / 4
-        ux = 1.0 * x / self.devw
-        uy = 1.0 * y / self.devh
-        x = vxp + vw * ux
-        y = vyp + vh * uy
-        return (x, y) 
-
-    def draw_stylus_pad(self, context, border_color, stylus_color, picked_color):
-        width = self.get_allocated_width()
-        height = self.get_allocated_height()
-
-        context.set_source_rgba(*border_color)
-        x0, y0 = self._stylus_reading_to_screen(0, 0)
-        x1, y1 = self._stylus_reading_to_screen(self.devw, self.devh)
-        # draw the box
-        context.set_line_width(1)
-        context.rectangle(x0, y0, x1 - x0, y1 - y0)
-        context.stroke()
-
-        x, y = self._stylus_reading_to_screen(*self.stylus_position)
-        self.draw_cross(context, stylus_color, x, y, 5, 1)
-
-        for p in self.store.devp:
-            x, y = self._stylus_reading_to_screen(*p)
-            self.draw_cross(context, picked_color, x, y, 5, 1)
-
 
     def draw_cross(self, context, color, x, y, size, linewidth):
         context.set_source_rgba(*color)
@@ -267,24 +265,6 @@ class UI(Gtk.DrawingArea):
         context.stroke()
         context.arc(x, y, size * 0.5, 0, 2 * numpy.pi)
         context.stroke()
-
-    def move_cross(self, x, y):
-        self.cross_position = x, y
-        self.text = ('SCR %g %g' % (x, y))
-        self.queue_draw()
-
-    def pixelize(self, points):
-        scr = self.get_screen()
-        sw = (scr.get_width() - 1)
-        sh = (scr.get_height() - 1)
-
-        points = numpy.array(points, copy=True, dtype='f8')
-        points[:, 0] *= sw 
-        points[:, 1] *= sh
-        points = numpy.floor(points)
-        points[:, 0] /= sw
-        points[:, 1] /= sh
-        return points
 
 class MyMainLoop(object):
     exception = None
@@ -309,12 +289,10 @@ class RewindableIter(object):
     def __iter__(self):
         return self
     def rewind(self):
-        print self.i
         self.i = self.i - 1
         if self.i < 0:
             raise Exception("Too much rewinding")
     def next(self):
-        print self.i
         rt = self.l[self.i]
         self.i = self.i + 1
         if self.i == len(self.l):
@@ -328,70 +306,30 @@ def myunique(a):
     unique_a = a[idx]
     return unique_a
 
-def measure(wacom):
+def measure(wacom, store):
     wacom.area = None
     devxmin, devymin, devxmax, devymax = wacomdev.area
+    if store is None:
+        store = Store(devxmax, devymax)
 
-    store = Store(devxmax, devymax)
+    wacom.area = devxmin, devymin, devxmax, devymax
+    devxmin, devymin, devxmax, devymax = wacomdev.area
 
     w = Gtk.Window()
-    ui = UI(store)
+    ui = UI(store, devxmin, devymin, devxmax, devymax)
     ui.show()
     w.add(ui)
-
-    corner = [0.0, 0.005, 0.01, 0.15, 0.02, 0.03, 0.04, 0.06, 0.08]
-    def buildcorners(grid):
-        x, y = numpy.meshgrid(grid, grid)
-        x = x.ravel()
-        y = y.ravel()
-        corner = numpy.array(zip(x, y))
-        points = numpy.concatenate([
-            zip(x, y),
-            zip(1. - x, y),
-            zip(x, 1. - y),
-            zip(1. - x, 1. - y),
-            ]
-        )
-        return points
-    c1 = buildcorners([0.0, 0.01])
-#    c2 = buildcorners([0.0, 0.04, 0.08])
-    points = numpy.concatenate([c1, c1], axis=0)
-    points = myunique(points)
-    points = ui.pixelize(points)
-
-    iterator = RewindableIter(points)
-
-    def started(calib):
-        scrp = iterator.next()
-        calib.move_cross(*scrp)
-
-    def clicked(calib, x, y):
-        store.push(calib.cross_position, (x, y))
-        try:
-            scrp = iterator.next()
-            calib.move_cross(*scrp)
-        except StopIteration:
-            MyMainLoop.quit()
-            return  
-
-    def canceled(calib):
-        if len(store) == 0: 
-            return
-        iterator.rewind()
-        iterator.rewind()
-        store.pop()
-        scrp = iterator.next()
-        calib.move_cross(*scrp)
 
     def aborted(calib):
         MyMainLoop.quit_with_exception(
             Exception("aborted!"))
 
+    def finished(calib):
+        MyMainLoop.quit()
+
     w.connect('destroy', aborted)
-    ui.connect('started', started)
-    ui.connect('clicked', clicked)
-    ui.connect('canceled', canceled)
     ui.connect('aborted', aborted)
+    ui.connect('finished', finished)
 
     w.show()
     # must be after show.
@@ -406,20 +344,21 @@ wacomdev = Wacom(ns.devid)
 if ns.use is not None:
     store = pickle.load(ns.use)
 else:
-    store = measure(wacomdev)
+    store = None
+measure(wacomdev, store)
 
 if ns.dump is not None:
     pickle.dump(store, ns.dump)
 
 grid = numpy.concatenate(
-    [numpy.linspace(0, 0.1, 10, endpoint=False),
-    numpy.linspace(0.1, 0.9, 8, endpoint=True),
-    1.0 - numpy.linspace(0, 0.1, 10, endpoint=False)])
+    [numpy.linspace(0, 0.1, 20, endpoint=False),
+    numpy.linspace(0.1, 0.9, 20, endpoint=True),
+    1.0 - numpy.linspace(0, 0.1, 20, endpoint=False)[::-1]])
 
 devxgrid = numpy.int64(store.devw * grid)
 devygrid = numpy.int64(store.devh * grid)
 devxygrid = numpy.array([(x, y) for y in devygrid for x in devxgrid])
-scrxy = store.invert(devxygrid)
+scrxy = store.predict(devxygrid)
 scrxy = scrxy.reshape(len(devygrid), len(devxgrid), 2)
 lines = []
 lines.append(', '.join(['%d' % x for x in devxgrid]))
@@ -431,8 +370,8 @@ ns.output.write(';\n'.join(lines) + '\n')
 if ns.plot:
     from matplotlib.figure import Figure
     from matplotlib.backends.backend_agg import FigureCanvasAgg
-    fig = Figure()
+    fig = Figure(figsize=(8, 8), dpi=200)
     ax = fig.add_subplot(111)
-    ax.plot(*scrxy.reshape(-1, 2).T, marker='.', ls='none')
+    ax.plot(*scrxy.reshape(-1, 2).T, marker=',', ls='none')
     canvas = FigureCanvasAgg(fig)
     fig.savefig(ns.plot)
